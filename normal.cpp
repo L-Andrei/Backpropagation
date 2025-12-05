@@ -10,10 +10,6 @@
 
 using namespace ifnum::linearAlgebra;
 
-// ==========================================
-// Utils (Mantidos Iguais)
-// ==========================================
-
 // Transposta
 template <typename T>
 Matrix<T> transpose(const Matrix<T>& m) {

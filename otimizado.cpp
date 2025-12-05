@@ -79,11 +79,7 @@ int main() {
     std::cout << "=== CONFIGURACAO HPC ===" << std::endl;
     std::cout << "Matrizes Peso: " << N_H1 << "x" << N_IN << " (e similares)" << std::endl;
     std::cout << "Batch Size: " << BATCH_SIZE << " | Total de elementos por batch: " << N_ELEMENTS << std::endl;
-    
-    // ---------------------------------------------------------
-    // 2. Alocação (Tudo é Matrix)
-    // ---------------------------------------------------------
-    
+
     // Pesos (W)
     Matrix<double> W1(N_H1, N_IN);
     Matrix<double> W2(N_H2, N_H1);
@@ -171,7 +167,7 @@ int main() {
         W3 += dW3 * alpha;
 
         // --- MONITORAMENTO ---
-        if ((epoch + 1) % 10 == 0) {
+        if (1) {
             auto now = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double> elapsed = now - start_total;
             
