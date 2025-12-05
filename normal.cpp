@@ -167,7 +167,7 @@ int main() {
         W3 += dW3 * alpha;
 
         // --- MONITORAMENTO ---
-        if ((epoch + 1) % 10 == 0) {
+        if (1) {
             auto now = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double> elapsed = now - start_total;
             
