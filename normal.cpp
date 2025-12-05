@@ -72,8 +72,7 @@ int main() {
 
     const double N_ELEMENTS = static_cast<double>(N_OUT * BATCH_SIZE);
 
-    std::cout << "=== CONFIGURACAO BASELINE (NAO OTIMIZADA) ===" << std::endl;
-    std::cout << "AVISO: Matrizes Grandes com Multiplicacao Padrao - Pode ser MUITO LENTO!" << std::endl;
+    std::cout << "AVISO: Matrizes Grandes com Multiplicacao Padrao " << std::endl;
     
     // ---------------------------------------------------------
     // 2. Alocação (Matrizes)
