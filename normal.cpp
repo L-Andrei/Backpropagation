@@ -5,12 +5,16 @@
 #include <iomanip>
 
 // Seus arquivos de cabeçalho
-#include "ifnum/linearAlgebra/matrix.hpp"
-#include "ifnum/linearAlgebra/indexGenerator.hpp" // Mantido apenas para Matrix/Utils
+#include <ifnum/linearAlgebra/matrix.hpp>
+#include <ifnum/linearAlgebra/indexGenerator.hpp>
 
 using namespace ifnum::linearAlgebra;
 
-// Transposta
+// ==========================================
+// Utils (Adaptados para Matrix)
+// ==========================================
+
+// Transposta (se precisar)
 template <typename T>
 Matrix<T> transpose(const Matrix<T>& m) {
     Matrix<T> t(m.cols(), m.rows());
@@ -25,8 +29,8 @@ Matrix<T> transpose(const Matrix<T>& m) {
 // Inicialização
 template <typename T>
 void randomize(Matrix<T>& m, double range) {
-    std::random_device rd;
-    std::mt19937 gen(rd()); 
+    static std::random_device rd;
+    static std::mt19937 gen(rd()); 
     std::uniform_real_distribution<T> dis(-range, range);
 
     for (size_t i = 0; i < m.rows(); ++i) {
@@ -36,7 +40,7 @@ void randomize(Matrix<T>& m, double range) {
     }
 }
 
-// Soma de todos os elementos (para MSE)
+// Somar todos os elementos
 template <typename T>
 T sum_all_elements(const Matrix<T>& m) {
     T total_sum = 0.0;
@@ -55,28 +59,28 @@ double act_linear(double x) { return x; }
 double d_act_linear(double x) { return 1.0; }
 
 // ==========================================
-// MLP NÃO OTIMIZADO (Matrix * Matrix)
+// MLP High Performance (Só Matrix)
 // ==========================================
 int main() {
     // ---------------------------------------------------------
-    // 1. Definição de Escala (Matrizes Grandes - MESMO TAMANHO)
+    // 1. Definição de Escala (Matrizes Grandes)
     // ---------------------------------------------------------
     const int BATCH_SIZE = 512;  
     const int EPOCHS = 50;       
     const double LR = 0.001;     
 
-    const int N_IN  = 1024;
+    const int N_IN  = 2048;   // mantido >= 2048
     const int N_H1  = 2048;
     const int N_H2  = 2048;
-    const int N_OUT = 128;
+    const int N_OUT = 1;      // saída única (aprox. sin)
 
     const double N_ELEMENTS = static_cast<double>(N_OUT * BATCH_SIZE);
 
-    std::cout << "AVISO: Matrizes Grandes com Multiplicacao Padrao " << std::endl;
-    
-    // ---------------------------------------------------------
-    // 2. Alocação (Matrizes)
-    // ---------------------------------------------------------
+    std::cout << "=== CONFIGURACAO HPC ===" << std::endl;
+    std::cout << "Matrizes Peso: " << N_H1 << "x" << N_IN << " (e similares)" << std::endl;
+    std::cout << "Batch Size: " << BATCH_SIZE << " | Total de elementos por batch: " << N_ELEMENTS << std::endl;
+
+    // Pesos (W)
     Matrix<double> W1(N_H1, N_IN);
     Matrix<double> W2(N_H2, N_H1);
     Matrix<double> W3(N_OUT, N_H2);
@@ -85,14 +89,30 @@ int main() {
     randomize(W2, 0.05);
     randomize(W3, 0.05);
 
+    // Dados de Treino (Input X e Target Y)
     Matrix<double> X(N_IN, BATCH_SIZE); 
     Matrix<double> Y(N_OUT, BATCH_SIZE);
     
-    randomize(X, 1.0); 
-    randomize(Y, 1.0); 
+    // Vamos preparar os dados: cada coluna tem um "angle" em [-pi, pi] na primeira posição.
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<double> angle_dist(-M_PI, M_PI);
+    std::uniform_real_distribution<double> noise_dist(-0.1, 0.1);
 
+    // Preencher X e Y
+    for (int b = 0; b < BATCH_SIZE; ++b) {
+        double angle = angle_dist(gen);
+        // primeira entrada da coluna recebe o ângulo; o resto é ruído pequeno
+        X(0, b) = angle;
+        for (int r = 1; r < N_IN; ++r) {
+            X(r, b) = noise_dist(gen); // pode ser zero também, pequeno ruído para evitar sobreajuste trivial
+        }
+        Y(0, b) = std::sin(angle); // target é sin(angle)
+    }
+
+    // Variáveis para o loop
     double final_mse = 0.0;
-    
+
     // ---------------------------------------------------------
     // 3. Training Loop
     // ---------------------------------------------------------
@@ -102,79 +122,62 @@ int main() {
     for (int epoch = 0; epoch < EPOCHS; ++epoch) {
         
         // --- FEED FORWARD ---
-        // SUBSTITUIDO: blockMultiply(W1, X) -> W1 * X
-        Matrix<double> Z1 = W1 * X; 
+        Matrix<double> Z1 = W1 * X;
         Matrix<double> A1 = Z1.apply(act_tanh);
 
-        // SUBSTITUIDO: blockMultiply(W2, A1) -> W2 * A1
         Matrix<double> Z2 = W2 * A1;
         Matrix<double> A2 = Z2.apply(act_tanh);
 
-        // SUBSTITUIDO: blockMultiply(W3, A2) -> W3 * A2
         Matrix<double> Z3 = W3 * A2;
-        Matrix<double> A3 = Z3.apply(act_linear); 
+        Matrix<double> A3 = Z3.apply(act_linear); // A3 tem dimensão 1 x BATCH_SIZE
 
-        // --- CALCULO DO ERRO ---
+        // --- CALCULO DO ERRO (PARA LOG) ---
         Matrix<double> E = Y - A3;
         Matrix<double> E_squared = E.hadamard(E); 
         double SSE = sum_all_elements(E_squared);
         double MSE = SSE / N_ELEMENTS;
-        final_mse = MSE; 
+        final_mse = MSE; // Guarda o MSE para o log final
 
         // --- BACKPROPAGATION ---
-        
-        // Delta 3 (Saída)
         Matrix<double> dZ3 = Z3.apply(d_act_linear); 
         Matrix<double> delta3 = E.hadamard(dZ3);
 
-        // dW3 = delta3 * A2_transposto
-        Matrix<double> A2_T = transpose(A2);
-        // SUBSTITUIDO: blockMultiply(delta3, A2_T) -> delta3 * A2_T
+        Matrix<double> A2_T = A2.T();
         Matrix<double> dW3 = delta3 * A2_T;
 
-        // Delta 2
-        Matrix<double> W3_T = transpose(W3);
-        // SUBSTITUIDO: blockMultiply(W3_T, delta3) -> W3_T * delta3
+        Matrix<double> W3_T = W3.T();
         Matrix<double> E2 = W3_T * delta3;
-        
+
         Matrix<double> dZ2 = Z2.apply(d_act_tanh);
         Matrix<double> delta2 = E2.hadamard(dZ2);
 
-        // dW2 = delta2 * A1_transposto
-        Matrix<double> A1_T = transpose(A1);
-        // SUBSTITUIDO: blockMultiply(delta2, A1_T) -> delta2 * A1_T
-        Matrix<double> dW2 = delta2 * A1_T;
+        Matrix<double> A1_T = A1.T();
+        Matrix<double> dW2 =delta2 * A1_T;
 
-        // Delta 1
-        Matrix<double> W2_T = transpose(W2);
-        // SUBSTITUIDO: blockMultiply(W2_T, delta2) -> W2_T * delta2
+        Matrix<double> W2_T = W2.T();
         Matrix<double> E1 = W2_T * delta2;
 
         Matrix<double> dZ1 = Z1.apply(d_act_tanh);
         Matrix<double> delta1 = E1.hadamard(dZ1);
 
-        // dW1 = delta1 * X_transposto
-        Matrix<double> X_T = transpose(X);
-        // SUBSTITUIDO: blockMultiply(delta1, X_T) -> delta1 * X_T
+        Matrix<double> X_T = X.T();
         Matrix<double> dW1 = delta1 * X_T;
 
-        // --- ATUALIZAÇÃO DE PESOS ---
-        double alpha = LR / BATCH_SIZE; 
+        // --- ATUALIZAÇÃO DE PESOS (Gradient Descent) ---
+        double alpha = LR / static_cast<double>(BATCH_SIZE);
         
         W1 += dW1 * alpha; 
         W2 += dW2 * alpha;
         W3 += dW3 * alpha;
 
         // --- MONITORAMENTO ---
-        if (1) {
-            auto now = std::chrono::high_resolution_clock::now();
-            std::chrono::duration<double> elapsed = now - start_total;
-            
-            std::cout << std::fixed << std::setprecision(6)
-                      << "Epoca " << epoch + 1 
-                      << " | Tempo acumulado: " << elapsed.count() << "s" 
-                      << " | Erro da Epoca (MSE): " << MSE << std::endl;
-        }
+        auto now = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed = now - start_total;
+        
+        std::cout << std::fixed << std::setprecision(6)
+                  << "Epoca " << epoch + 1 
+                  << " | Tempo acumulado: " << elapsed.count() << "s" 
+                  << " | Erro da Epoca (MSE): " << MSE << std::endl;
     }
 
     auto end_total = std::chrono::high_resolution_clock::now();
@@ -185,6 +188,29 @@ int main() {
     std::cout << std::fixed << std::setprecision(6)
               << "Tempo Total: " << final_time.count() << "s" << std::endl;
     std::cout << "Erro Final (MSE do último batch): " << final_mse << std::endl;
+
+    // --- AVALIAÇÃO SIMPLES: predição para um ângulo de teste ---
+    double test_angle = 0.7; // exemplo qualquer
+    Matrix<double> x_test(N_IN, 1);
+    x_test(0, 0) = test_angle;
+    for (int r = 1; r < N_IN; ++r) x_test(r, 0) = 0.0;
+
+    Matrix<double> z1_t = W1*x_test;
+    Matrix<double> a1_t = z1_t.apply(act_tanh);
+
+    Matrix<double> z2_t = W2 * a1_t;
+    Matrix<double> a2_t = z2_t.apply(act_tanh);
+
+    Matrix<double> z3_t = W3 * a2_t;
+    Matrix<double> a3_t = z3_t.apply(act_linear);
+
+    double predicted = a3_t(0, 0);
+    double expected = std::sin(test_angle);
+
+    std::cout << std::fixed << std::setprecision(8)
+              << "Teste -> angle: " << test_angle
+              << " | Predito: " << predicted
+              << " | Real(sin): " << expected << std::endl;
 
     return 0;
 }
