@@ -67,7 +67,7 @@ int main() {
     // ---------------------------------------------------------
     const int BATCH_SIZE = 512;  
     const int EPOCHS = 50;       
-    const double LR = 0.001;     
+    const double LR = 0.015;     
 
     const int N_IN  = 2048;   // mantido >= 2048
     const int N_H1  = 2048;
@@ -164,7 +164,7 @@ int main() {
         Matrix<double> dW1 = delta1 * X_T;
 
         // --- ATUALIZAÇÃO DE PESOS (Gradient Descent) ---
-        double alpha = LR / static_cast<double>(BATCH_SIZE);
+        double alpha = LR;
         
         W1 += dW1 * alpha; 
         W2 += dW2 * alpha;
