@@ -3,214 +3,160 @@
 #include <random>
 #include <chrono>
 #include <iomanip>
-
-// Seus arquivos de cabeçalho
-#include <ifnum/linearAlgebra/matrix.hpp>
-#include <ifnum/linearAlgebra/indexGenerator.hpp>
+#include "ifnum/linearAlgebra/matrix.hpp"
+#include "ifnum/linearAlgebra/indexGenerator.hpp"
 
 using namespace ifnum::linearAlgebra;
 
-// ==========================================
-// Utils (Adaptados para Matrix)
-// ==========================================
-
-// Transposta (se precisar)
+// =======================================================
+// blockyMultiply — multiplicação em blocos (BLAS-like)
+// =======================================================
 template <typename T>
-Matrix<T> transpose(const Matrix<T>& m) {
-    Matrix<T> t(m.cols(), m.rows());
-    for (size_t i = 0; i < m.rows(); ++i) {
-        for (size_t j = 0; j < m.cols(); ++j) {
-            t(j, i) = m(i, j);
-        }
-    }
-    return t;
+Matrix<T> blockyMultiply(const Matrix<T>& A, const Matrix<T>& B, int BS = 64) {
+    size_t n = A.rows();
+    size_t m = A.cols();
+    size_t p = B.cols();
+
+    Matrix<T> C(n, p, (T)0);
+
+    for (size_t ii = 0; ii < n; ii += BS)
+        for (size_t jj = 0; jj < p; jj += BS)
+            for (size_t kk = 0; kk < m; kk += BS) {
+
+                size_t i_end = std::min(ii + BS, n);
+                size_t j_end = std::min(jj + BS, p);
+                size_t k_end = std::min(kk + BS, m);
+
+                for (size_t i = ii; i < i_end; ++i)
+                    for (size_t k = kk; k < k_end; ++k) {
+                        T aik = A(i, k);
+                        for (size_t j = jj; j < j_end; ++j)
+                            C(i, j) += aik * B(k, j);
+                    }
+            }
+    return C;
 }
 
-// Inicialização
-template <typename T>
-void randomize(Matrix<T>& m, double range) {
-    static std::random_device rd;
-    static std::mt19937 gen(rd()); 
-    std::uniform_real_distribution<T> dis(-range, range);
+// =======================================================
+double relu(double x) { return x > 0 ? x : 0; }
+double d_relu(double x) { return x > 0 ? 1 : 0; }
+double linear(double x) { return x; }
+double d_linear(double) { return 1; }
 
-    for (size_t i = 0; i < m.rows(); ++i) {
-        for (size_t j = 0; j < m.cols(); ++j) {
-            m(i, j) = dis(gen);
-        }
-    }
+void xavier_init(Matrix<double>& M, int fan_in, int fan_out) {
+    static std::mt19937 gen(std::random_device{}());
+    double sd = std::sqrt(2.0 / (fan_in + fan_out));
+    std::normal_distribution<double> dist(0.0, sd);
+    for (size_t i = 0; i < M.rows(); ++i)
+        for (size_t j = 0; j < M.cols(); ++j)
+            M(i, j) = dist(gen);
 }
 
-// Somar todos os elementos
-template <typename T>
-T sum_all_elements(const Matrix<T>& m) {
-    T total_sum = 0.0;
-    for (size_t i = 0; i < m.rows(); ++i) {
-        for (size_t j = 0; j < m.cols(); ++j) {
-            total_sum += m(i, j);
-        }
-    }
-    return total_sum;
+double sum_all(const Matrix<double>& M) {
+    double s = 0;
+    for (size_t i = 0; i < M.rows(); ++i)
+        for (size_t j = 0; j < M.cols(); ++j)
+            s += M(i, j);
+    return s;
 }
 
-// Funções de Ativação
-double act_tanh(double x) { return std::tanh(x); }
-double d_act_tanh(double x) { double t = std::tanh(x); return 1.0 - t * t; }
-double act_linear(double x) { return x; }
-double d_act_linear(double x) { return 1.0; }
-
-// ==========================================
-// MLP High Performance (Só Matrix)
-// ==========================================
+// =======================================================
+//  MLP com blockyMultiply
+// =======================================================
 int main() {
-    // ---------------------------------------------------------
-    // 1. Definição de Escala (Matrizes Grandes)
-    // ---------------------------------------------------------
-    const int BATCH_SIZE = 512;  
-    const int EPOCHS = 50;       
-    const double LR = 0.015;     
+    const int BATCH = 256;
+    const int EPOCHS = 400;
+    const double LR = 0.01;
 
-    const int N_IN  = 2048;   // mantido >= 2048
-    const int N_H1  = 2048;
-    const int N_H2  = 2048;
-    const int N_OUT = 1;      // saída única (aprox. sin)
+    const int N_IN = 2048;
+    const int H1 = 1024;
+    const int H2 = 512;
+    const int H3 = 256;
+    const int H4 = 128;
+    const int H5 = 64;
+    const int N_OUT = 1;
 
-    const double N_ELEMENTS = static_cast<double>(N_OUT * BATCH_SIZE);
+    Matrix<double> W1(H1, N_IN), W2(H2, H1), W3(H3, H2),
+                   W4(H4, H3), W5(H5, H4), W6(N_OUT, H5);
 
-    std::cout << "=== CONFIGURACAO HPC ===" << std::endl;
-    std::cout << "Matrizes Peso: " << N_H1 << "x" << N_IN << " (e similares)" << std::endl;
-    std::cout << "Batch Size: " << BATCH_SIZE << " | Total de elementos por batch: " << N_ELEMENTS << std::endl;
+    xavier_init(W1, N_IN, H1);
+    xavier_init(W2, H1, H2);
+    xavier_init(W3, H2, H3);
+    xavier_init(W4, H3, H4);
+    xavier_init(W5, H4, H5);
+    xavier_init(W6, H5, N_OUT);
 
-    // Pesos (W)
-    Matrix<double> W1(N_H1, N_IN);
-    Matrix<double> W2(N_H2, N_H1);
-    Matrix<double> W3(N_OUT, N_H2);
+    Matrix<double> X(N_IN, BATCH);
+    Matrix<double> Y(N_OUT, BATCH);
 
-    randomize(W1, 0.05);
-    randomize(W2, 0.05);
-    randomize(W3, 0.05);
+    std::mt19937 gen(std::random_device{}());
+    std::uniform_real_distribution<double> dist(-M_PI, M_PI);
 
-    // Dados de Treino (Input X e Target Y)
-    Matrix<double> X(N_IN, BATCH_SIZE); 
-    Matrix<double> Y(N_OUT, BATCH_SIZE);
-    
-    // Vamos preparar os dados: cada coluna tem um "angle" em [-pi, pi] na primeira posição.
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_real_distribution<double> angle_dist(-M_PI, M_PI);
-    std::uniform_real_distribution<double> noise_dist(-0.1, 0.1);
-
-    // Preencher X e Y
-    for (int b = 0; b < BATCH_SIZE; ++b) {
-        double angle = angle_dist(gen);
-        // primeira entrada da coluna recebe o ângulo; o resto é ruído pequeno
-        X(0, b) = angle;
-        for (int r = 1; r < N_IN; ++r) {
-            X(r, b) = noise_dist(gen); // pode ser zero também, pequeno ruído para evitar sobreajuste trivial
-        }
-        Y(0, b) = std::sin(angle); // target é sin(angle)
+    for (int b = 0; b < BATCH; b++) {
+        double ang = dist(gen);
+        double s = ang / M_PI;
+        for (int i = 0; i < N_IN; i++) X(i, b) = s;
+        Y(0, b) = std::sin(ang);
     }
 
-    // Variáveis para o loop
-    double final_mse = 0.0;
+    for (int epoch = 0; epoch < EPOCHS; epoch++) {
 
-    // ---------------------------------------------------------
-    // 3. Training Loop
-    // ---------------------------------------------------------
-    std::cout << "Iniciando Loop de Treinamento..." << std::endl;
-    auto start_total = std::chrono::high_resolution_clock::now();
+        // ================ Forward ================
+        auto Z1 = blockyMultiply(W1, X);
+        auto A1 = Z1.apply(relu);
 
-    for (int epoch = 0; epoch < EPOCHS; ++epoch) {
-        
-        // --- FEED FORWARD ---
-        Matrix<double> Z1 = blockMultiply(W1, X);
-        Matrix<double> A1 = Z1.apply(act_tanh);
+        auto Z2 = blockyMultiply(W2, A1);
+        auto A2 = Z2.apply(relu);
 
-        Matrix<double> Z2 = blockMultiply(W2, A1);
-        Matrix<double> A2 = Z2.apply(act_tanh);
+        auto Z3 = blockyMultiply(W3, A2);
+        auto A3 = Z3.apply(relu);
 
-        Matrix<double> Z3 = blockMultiply(W3, A2);
-        Matrix<double> A3 = Z3.apply(act_linear); // A3 tem dimensão 1 x BATCH_SIZE
+        auto Z4 = blockyMultiply(W4, A3);
+        auto A4 = Z4.apply(relu);
 
-        // --- CALCULO DO ERRO (PARA LOG) ---
-        Matrix<double> E = Y - A3;
-        Matrix<double> E_squared = E.hadamard(E); 
-        double SSE = sum_all_elements(E_squared);
-        double MSE = SSE / N_ELEMENTS;
-        final_mse = MSE; // Guarda o MSE para o log final
+        auto Z5 = blockyMultiply(W5, A4);
+        auto A5 = Z5.apply(relu);
 
-        // --- BACKPROPAGATION ---
-        Matrix<double> dZ3 = Z3.apply(d_act_linear); 
-        Matrix<double> delta3 = E.hadamard(dZ3);
+        auto Z6 = blockyMultiply(W6, A5);
+        auto A6 = Z6.apply(linear);
 
-        Matrix<double> A2_T = A2.T();
-        Matrix<double> dW3 = blockMultiply(delta3, A2_T);
+        // erro
+        Matrix<double> E = Y - A6;
+        double MSE = sum_all(E.hadamard(E)) / BATCH;
 
-        Matrix<double> W3_T = W3.T();
-        Matrix<double> E2 = blockMultiply(W3_T, delta3);
+        // ================ Backprop ================
+        auto dZ6 = Z6.apply(d_linear);
+        auto d6 = E.hadamard(dZ6);
 
-        Matrix<double> dZ2 = Z2.apply(d_act_tanh);
-        Matrix<double> delta2 = E2.hadamard(dZ2);
+        auto dW6 = blockyMultiply(d6, A5.T());
 
-        Matrix<double> A1_T = A1.T();
-        Matrix<double> dW2 = blockMultiply(delta2, A1_T);
+        auto d5 = blockyMultiply(W6.T(), d6).hadamard(Z5.apply(d_relu));
+        auto dW5 = blockyMultiply(d5, A4.T());
 
-        Matrix<double> W2_T = W2.T();
-        Matrix<double> E1 = blockMultiply(W2_T, delta2);
+        auto d4 = blockyMultiply(W5.T(), d5).hadamard(Z4.apply(d_relu));
+        auto dW4 = blockyMultiply(d4, A3.T());
 
-        Matrix<double> dZ1 = Z1.apply(d_act_tanh);
-        Matrix<double> delta1 = E1.hadamard(dZ1);
+        auto d3 = blockyMultiply(W4.T(), d4).hadamard(Z3.apply(d_relu));
+        auto dW3 = blockyMultiply(d3, A2.T());
 
-        Matrix<double> X_T = X.T();
-        Matrix<double> dW1 = blockMultiply(delta1, X_T);
+        auto d2 = blockyMultiply(W3.T(), d3).hadamard(Z2.apply(d_relu));
+        auto dW2 = blockyMultiply(d2, A1.T());
 
-        // --- ATUALIZAÇÃO DE PESOS (Gradient Descent) ---
-        double alpha = LR;
-        
-        W1 += dW1 * alpha; 
+        auto d1 = blockyMultiply(W2.T(), d2).hadamard(Z1.apply(d_relu));
+        auto dW1 = blockyMultiply(d1, X.T());
+
+        double alpha = LR / BATCH;
+
+        W1 += dW1 * alpha;
         W2 += dW2 * alpha;
         W3 += dW3 * alpha;
+        W4 += dW4 * alpha;
+        W5 += dW5 * alpha;
+        W6 += dW6 * alpha;
 
-        // --- MONITORAMENTO ---
-        auto now = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double> elapsed = now - start_total;
-        
-        std::cout << std::fixed << std::setprecision(6)
-                  << "Epoca " << epoch + 1 
-                  << " | Tempo acumulado: " << elapsed.count() << "s" 
-                  << " | Erro da Epoca (MSE): " << MSE << std::endl;
+        if (epoch % 10 == 0)
+            std::cout << "Epoch " << epoch << " | MSE: " << MSE << "\n";
     }
-
-    auto end_total = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> final_time = end_total - start_total;
-    
-    // --- ERRO FINAL ---
-    std::cout << "\n=== FIM ===" << std::endl;
-    std::cout << std::fixed << std::setprecision(6)
-              << "Tempo Total: " << final_time.count() << "s" << std::endl;
-    std::cout << "Erro Final (MSE do último batch): " << final_mse << std::endl;
-
-    // --- AVALIAÇÃO SIMPLES: predição para um ângulo de teste ---
-    double test_angle = 0.7; // exemplo qualquer
-    Matrix<double> x_test(N_IN, 1);
-    x_test(0, 0) = test_angle;
-    for (int r = 1; r < N_IN; ++r) x_test(r, 0) = 0.0;
-
-    Matrix<double> z1_t = blockMultiply(W1, x_test);
-    Matrix<double> a1_t = z1_t.apply(act_tanh);
-
-    Matrix<double> z2_t = blockMultiply(W2, a1_t);
-    Matrix<double> a2_t = z2_t.apply(act_tanh);
-
-    Matrix<double> z3_t = blockMultiply(W3, a2_t);
-    Matrix<double> a3_t = z3_t.apply(act_linear);
-
-    double predicted = a3_t(0, 0);
-    double expected = std::sin(test_angle);
-
-    std::cout << std::fixed << std::setprecision(8)
-              << "Teste -> angle: " << test_angle
-              << " | Predito: " << predicted
-              << " | Real(sin): " << expected << std::endl;
 
     return 0;
 }
