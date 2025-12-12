@@ -92,8 +92,8 @@ int main() {
     
     const int BATCH_SIZE = SIZE; 
     
-    const int EPOCHS = 100;
-    const double LR = 0.015; 
+    const int EPOCHS = 1000;
+    const double LR = 0.05; 
 
     std::cout << "=== REPLICA MLP.M (BROADCAST MANUAL) ===" << std::endl;
 

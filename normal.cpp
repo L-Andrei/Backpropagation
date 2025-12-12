@@ -88,8 +88,8 @@ int main() {
     
     const int BATCH_SIZE = SIZE; 
     
-    const int EPOCHS = 100;
-    const double LR = 0.015; 
+    const int EPOCHS = 1000;
+    const double LR = 0.05; 
 
     std::cout << "=== REPLICA MLP.M (OPERADOR *) ===" << std::endl;
 
@@ -140,22 +140,22 @@ int main() {
         // -------------------------------------------------
         
         // Layer 1
-        Matrix<double> N1 = W1 * P; // SUBSTITUÍDO
+        Matrix<double> N1 = W1 * P; 
         add_bias_broadcast(N1, B1); 
         Matrix<double> A1 = N1.apply(act_tanh);
 
         // Layer 2
-        Matrix<double> N2 = W2 * A1; // SUBSTITUÍDO
+        Matrix<double> N2 = W2 * A1; 
         add_bias_broadcast(N2, B2);
         Matrix<double> A2 = N2.apply(act_tanh);
 
         // Layer 3
-        Matrix<double> N3 = W3 * A2; // SUBSTITUÍDO
+        Matrix<double> N3 = W3 * A2; 
         add_bias_broadcast(N3, B3);
         Matrix<double> A3 = N3.apply(act_tanh);
 
         // Layer 4
-        Matrix<double> N4 = W4 * A3; // SUBSTITUÍDO
+        Matrix<double> N4 = W4 * A3; 
         add_bias_broadcast(N4, B4);
         Matrix<double> A4 = N4.apply(act_linear);
 
@@ -175,19 +175,19 @@ int main() {
 
         // S3
         Matrix<double> W4_T = W4.T();
-        Matrix<double> error_prop_3 = W4_T * S4; // SUBSTITUÍDO
+        Matrix<double> error_prop_3 = W4_T * S4; 
         Matrix<double> dN3 = N3.apply(d_act_tanh);
         Matrix<double> S3 = error_prop_3.hadamard(dN3);
 
         // S2
         Matrix<double> W3_T = W3.T();
-        Matrix<double> error_prop_2 = W3_T * S3; // SUBSTITUÍDO
+        Matrix<double> error_prop_2 = W3_T * S3; 
         Matrix<double> dN2 = N2.apply(d_act_tanh);
         Matrix<double> S2 = error_prop_2.hadamard(dN2);
 
         // S1
         Matrix<double> W2_T = W2.T();
-        Matrix<double> error_prop_1 = W2_T * S2; // SUBSTITUÍDO
+        Matrix<double> error_prop_1 = W2_T * S2; 
         Matrix<double> dN1 = N1.apply(d_act_tanh);
         Matrix<double> S1 = error_prop_1.hadamard(dN1);
 
@@ -198,28 +198,28 @@ int main() {
 
         // Update L4
         Matrix<double> A3_T = A3.T();
-        Matrix<double> dW4 = S4 * A3_T; // SUBSTITUÍDO
+        Matrix<double> dW4 = S4 * A3_T; 
         Matrix<double> dB4 = sum_batch_gradients(S4); 
         W4 = W4 - dW4 * alpha;
         B4 = B4 - dB4 * alpha;
 
         // Update L3
         Matrix<double> A2_T = A2.T();
-        Matrix<double> dW3 = S3 * A2_T; // SUBSTITUÍDO
+        Matrix<double> dW3 = S3 * A2_T;
         Matrix<double> dB3 = sum_batch_gradients(S3);
         W3 = W3 - dW3 * alpha;
         B3 = B3 - dB3 * alpha;
 
         // Update L2
         Matrix<double> A1_T = A1.T();
-        Matrix<double> dW2 = S2 * A1_T; // SUBSTITUÍDO
+        Matrix<double> dW2 = S2 * A1_T;
         Matrix<double> dB2 = sum_batch_gradients(S2);
         W2 = W2 - dW2 * alpha;
         B2 = B2 - dB2 * alpha;
 
         // Update L1
         Matrix<double> P_T = P.T();
-        Matrix<double> dW1 = S1 * P_T; // SUBSTITUÍDO
+        Matrix<double> dW1 = S1 * P_T; 
         Matrix<double> dB1 = sum_batch_gradients(S1);
         W1 = W1 - dW1 * alpha;
         B1 = B1 - dB1 * alpha;
